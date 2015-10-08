@@ -1,0 +1,16 @@
+{
+    "installed_packages":
+    [
+        "BracketHighlighter",
+        "GenerateUUID",
+        "HexViewer",
+        "PackageResourceViewer",
+        "PlistJsonConverter",
+        "Python Flake8 Lint",
+        "Python Improved",
+        "SideBarEnhancements",
+        "SideBarGit",
+        "Git",
+        "GitGutter"
+    ]
+}

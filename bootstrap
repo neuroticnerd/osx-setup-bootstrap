@@ -1,0 +1,312 @@
+#!/usr/bin/env bash
+set -e
+sudo -v -p "Some commands may require sudo access, please enter your password: "
+function newline() {
+    printf "\n"
+}
+
+
+###############################################################################
+# Initial Setup                                                               #
+###############################################################################
+
+### make sure xcode utilities are installed
+if ! xcode-select -p &> /dev/null; then
+    echo "installing xcode..."
+    touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress;
+    PROD=$(softwareupdate -l |
+      grep "\*.*Command Line" |
+      head -n 1 | awk -F"*" '{print $2}' |
+      sed -e 's/^ *//' |
+      tr -d '\n')
+    softwareupdate -i "$PROD" -v;
+    #xcode-select --install && :
+    #read -p "Press any key to continue... " -n1 -s
+    newline
+else
+    echo "xcode utilities already installed."; newline
+fi
+
+### install bash profile
+printf "installing bash profile... "
+if curl --output ~/.bash_profile -O https://gist.githubusercontent.com/neuroticnerd/52f41ef0aea6ee156154/raw/mac_dotbash_profile &> /dev/null; then
+    source ~/.bash_profile
+    echo "done."
+else
+    echo "error obtaining bash profile!"
+    exit 1
+fi
+newline
+
+### install/update homebrew
+if ! brew help &> /dev/null; then
+    echo "installing homebrew..."
+    ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
+    brew doctor
+    newline
+else
+    echo "updating homebrew..."
+    brew update && brew upgrade
+    newline
+fi
+
+### install utilities
+echo "installing utilities..."
+brew tap homebrew/science
+brew install opencv3
+brew install wget
+brew install ack
+brew install ffind
+brew install autoenv
+brew install coreutils
+brew install ffmpeg
+brew install node
+newline
+
+### install homebrew cask
+echo "installing brew cask..."
+brew tap caskroom/cask
+brew tap caskroom/versions
+brew install brew-cask
+newline
+
+### install main software
+echo "installing core software..."
+#export HOMEBREW_CASK_OPTS="--appdir=/Applications --caskroom=/usr/local/Caskroom"
+export HOMEBREW_CASK_OPTS="--appdir=/Applications"
+function bcinstall() {
+    brew cask install $@
+}
+bcinstall firefox
+bcinstall google-chrome
+bcinstall google-drive
+bcinstall lastpass
+bcinstall 1password
+bcinstall virtualbox
+bcinstall vagrant
+bcinstall sublime-text3
+bcinstall smartgit
+bcinstall sourcetree
+bcinstall kdiff3
+bcinstall slack
+bcinstall hipchat
+bcinstall dropbox
+bcinstall cog
+bcinstall vlc
+bcinstall the-unarchiver
+bcinstall alfred
+bcinstall gimp
+bcinstall xquartz
+bcinstall x2goclient
+bcinstall transmit
+bcinstall java
+bcinstall eclipse-java
+bcinstall clamxav
+bcinstall evernote
+bcinstall spotify
+bcinstall spotify-notifications
+bcinstall iterm2
+bcinstall gpgtools
+#bcinstall pycharm
+#bcinstall charles
+#bcinstall easyfind
+
+brew cleanup --force
+#rm -rf /Library/Caches/Homebrew/*
+newline
+
+### setup python environment
+echo "setting up python environment..."
+brew install python
+gpip install --upgrade pip setuptools wheel
+gpip install --upgrade virtualenv virtualenvwrapper
+gpip install --upgrade requests sqlalchemy
+gpip install --upgrade markdown beautifulsoup4 lxml
+gpip install --upgrade Pillow Jinja2 Pygments
+newline
+
+### display brew doctor output
+brew doctor
+
+
+###############################################################################
+# OS X Tweaks                                                                 #
+###############################################################################
+echo "configuring OS X..."
+function defread() {
+    #$1 = domain, $2 = key
+    defaults read $1 $2 || :
+}
+
+# Finder: show hidden files by default
+defaults write com.apple.finder AppleShowAllFiles -bool true
+
+# Finder: always show full posix path
+defaults write com.apple.finder _FXShowPosixPathInTitle -bool YES
+
+# Finder: show all filename extensions
+defaults write NSGlobalDomain AppleShowAllExtensions -bool true
+
+# Finder: default to column view
+defaults write com.apple.Finder FXPreferredViewStyle clmv
+
+# Finder: show status bar
+defaults write com.apple.finder ShowStatusBar -bool true
+
+# Finder: allow text selection in Quick Look
+defaults write com.apple.finder QLEnableTextSelection -bool true
+
+# Finder: disable the warning when changing a file extension
+defaults write com.apple.finder FXEnableExtensionChangeWarning -bool false
+
+# Mouse: set tracking speed of mouse
+defaults write -g com.apple.mouse.scaling 2.4
+
+# Terminal: tracking mouse follow
+defaults write com.apple.terminal FocusFollowsMouse -string true
+
+# Vars: snap-to-grid
+PLISTFILE="${HOME}/Library/Preferences/com.apple.finder.plist"
+STG_DESKTOP=":DesktopViewSettings:IconViewSettings:arrangeBy"
+STG_FK_VIEW=":FK_StandardViewSettings:IconViewSettings:arrangeBy"
+STG_STANDARD=":StandardViewSettings:IconViewSettings:arrangeBy"
+
+### [login]: show basic system info at login
+sudo defaults write /Library/Preferences/com.apple.loginwindow AdminHostInfo HostName
+
+### [desktop]: enable snap-to-grid for icons on the desktop and in other icon views
+if ! /usr/libexec/PlistBuddy -c "Set $STG_DESKTOP grid" $PLISTFILE; then
+    /usr/libexec/PlistBuddy -c "Add $STG_DESKTOP string grid" $PLISTFILE
+fi
+if ! /usr/libexec/PlistBuddy -c "Set $STG_FK_VIEW grid" $PLISTFILE; then
+    /usr/libexec/PlistBuddy -c "Add $STG_FK_VIEW string grid" $PLISTFILE
+fi
+if ! /usr/libexec/PlistBuddy -c "Set $STG_STANDARD grid" $PLISTFILE; then
+    /usr/libexec/PlistBuddy -c "Add $STG_STANDARD string grid" $PLISTFILE
+fi
+
+### [trackpad]: enable tap-to-click
+defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad Clicking -bool true
+defaults write NSGlobalDomain com.apple.mouse.tapBehavior -int 1
+defaults -currentHost write NSGlobalDomain com.apple.mouse.tapBehavior -int 1
+
+### [trackpad]: map bottom right corner to right-click
+defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad TrackpadCornerSecondaryClick -int 2
+defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad TrackpadRightClick -bool true
+defaults -currentHost write NSGlobalDomain com.apple.trackpad.trackpadCornerClickBehavior -int 1
+defaults -currentHost write NSGlobalDomain com.apple.trackpad.enableSecondaryClick -bool true
+
+### [scrolling]: disable unnatural 'natural' scrolling
+defaults write NSGlobalDomain com.apple.swipescrolldirection -bool false
+
+### [scrolling]: always show scroll bars
+defaults write NSGlobalDomain AppleShowScrollBars -string “Always”
+
+### [menubar]: show percentage on battery
+defaults write com.apple.menuextra.battery ShowPercent -string "YES"
+
+### [menubar]: show volume in menu bar
+defaults write com.apple.systemuiserver menuExtras -array "/System/Library/CoreServices/Menu Extras/Bluetooth.menu" "/System/Library/CoreServices/Menu Extras/AirPort.menu" "/System/Library/CoreServices/Menu Extras/Battery.menu" "/System/Library/CoreServices/Menu Extras/Clock.menu"
+
+### [systemui]: expanded save panel by default
+defaults write NSGlobalDomain NSNavPanelExpandedStateForSaveMode -bool true
+defaults write NSGlobalDomain NSNavPanelExpandedStateForSaveMode2 -bool true
+
+### [systemui]: expanded print panel by default
+defaults write NSGlobalDomain PMPrintingExpandedStateForPrint -bool true
+defaults write NSGlobalDomain PMPrintingExpandedStateForPrint2 -bool true
+
+### [systemui]: disable the “Are you sure you want to open this application?” dialog
+defaults write com.apple.LaunchServices LSQuarantine -bool false
+
+### [systemui]: enable full keyboard access for all controls
+defaults write NSGlobalDomain AppleKeyboardUIMode -int 3
+
+### [updates]: check for software updates daily
+defaults write com.apple.SoftwareUpdate ScheduleFrequency -int 1
+
+### [input]: disable smart quotes and smart dashes
+defaults write NSGlobalDomain NSAutomaticQuoteSubstitutionEnabled -bool false
+defaults write NSGlobalDomain NSAutomaticDashSubstitutionEnabled -bool false
+
+### [screen]: require password immediately after sleep or screen saver begins
+defaults write com.apple.screensaver askForPassword -int 1
+defaults write com.apple.screensaver askForPasswordDelay -int 0
+
+### [screenshots]: set screenshot format
+defaults write com.apple.screencapture type -string “png”
+
+### [screenshots]: change screenshot save location
+defaults write com.apple.screencapture location ~/screenshots
+
+### [screenshots]: disable screenshot shadows
+defaults write com.apple.screencapture disable-shadow -bool true
+
+# Enable subpixel font rendering on non-Apple LCDs
+#defaults write NSGlobalDomain AppleFontSmoothing -int 2
+# Enable HiDPI display modes (requires restart)
+#sudo defaults write /Library/Preferences/com.apple.windowserver DisplayResolutionEnabled -bool true
+
+# Set a custom wallpaper image. `DefaultDesktop.jpg` is already a symlink, and
+# all wallpapers are in `/Library/Desktop Pictures/`. The default is `Wave.jpg`.
+#rm -rf ~/Library/Application Support/Dock/desktoppicture.db
+#sudo rm -rf /System/Library/CoreServices/DefaultDesktop.jpg
+#sudo ln -s /path/to/your/image /System/Library/CoreServices/DefaultDesktop.jpg
+
+
+echo "resetting Finder..."
+# reset finder
+killall Finder
+
+
+###############################################################################
+# Install Firefox Addons                                                      #
+###############################################################################
+echo "configuring firefox..."
+newline
+
+### install adblock plus
+./ffaddon 1865
+newline
+
+### install noscript
+./ffaddon 722
+newline
+
+
+###############################################################################
+# Configure Sublime Text                                                      #
+###############################################################################
+echo "[sublime] configuring sublime text..."
+STCONF="${HOME}/Library/Application Support/Sublime Text 3"
+GHURL="https://github.com/neuroticnerd/osx-setup-bootstrap/blob/master"
+
+### deploy user preferences
+echo "[sublime] deploying user preferences..."
+USERCONF_FILE="$STCONF/Packages/User/Preferences.sublime-settings"
+CONF_URL="https://gist.githubusercontent.com/neuroticnerd/130577d9fe737fa2ab13/raw/sublime-user-settings.json"
+wget -nv -O "$USERCONF_FILE" $CONF_URL
+
+### enable access to the provided subl cli
+echo "[sublime] ensuring subl command is available..."
+if [ ! -f "/usr/local/bin/subl" ]; then
+    LNSUBL="/Applications/Sublime Text.app/Contents/SharedSupport/bin/subl"
+    ln -s "$LNSUBL" /usr/local/bin/subl
+fi
+newline
+
+### enable package control
+echo "[sublime] downloading package control..."
+PKGFILE="$STCONF/Installed Packages/Package Control.sublime-package"
+PKGURL="https://packagecontrol.io/Package%20Control.sublime-package"
+wget -nv -O "$PKGFILE" $PKGURL
+
+### configure sublime packages
+echo "[sublime] configuring sublime packages..."
+PKGCONF="$STCONF/Packages/User/Pakcage Control.sublime-settings"
+CONF_URL="$GHURL/config/sublime-packages.json"
+wget -nv -O "$PKGCONF" $CONF_URL
+
+
+echo "done. Please restart for all changes to take effect!"
+#sudo shutdown -r now

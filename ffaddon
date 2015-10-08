@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -e
+
+### get the addon identifier
+ADDONID="$1"
+if [ "$ADDONID" == "" ]; then
+    echo "ERROR: You must supply an identifier parameter!"
+    exit 1
+fi
+shift
+PROFILE="$2"
+TMPDIR="/tmp/ffaddons"
+ADDONDIR="$TMPDIR/$ADDONID"
+ADDONURL="https://addons.mozilla.org/firefox/downloads/latest/$ADDONID/addon-$ADDONID-latest.xpi"
+LOGFILE="ffaddon.log"
+echo "[firefox] installing addon $ADDONID..."
+echo "[firefox] installing addon $ADDONID..." > $LOGFILE
+
+### determine the profile directory
+if [ "$PROFILE" == "" ]; then
+    PROFILEDIR=$(cat "${HOME}/Library/Application Support/Firefox/profiles.ini" | sed -n -e 's/^.*Path=//p' | head -n 1)
+    EXTENTIONS="${HOME}/Library/Application Support/Firefox/${PROFILEDIR}/extensions"
+    if [ -z "$PROFILEDIR" ]; then
+        open -a firefox -CreateProfile default_profile
+        echo $PROFILEDIR
+        echo "Cannot find Firefox profile directory"
+        exit 1
+    fi
+fi
+echo "[firefox:profile] ${HOME}/Library/Application Support/Firefox/$PROFILEDIR"
+
+### clean up potential old addon directory
+rm -rf $ADDONDIR
+mkdir -p $ADDONDIR
+
+### download and unpack addon xpi then get hash id
+pushd $ADDONDIR > /dev/null
+wget -O extension.xpi $ADDONURL >> $LOGFILE 2>&1
+unzip extension.xpi >> $LOGFILE 2>&1
+rm extension.xpi
+FFHASH=$(grep -m 1 -e em:id install.rdf)
+FFHASH=${FFHASH#*\>}
+FFHASH=${FFHASH%<*}
+AONAME=$(grep -m 1 -e em:name install.rdf)
+AONAME=${AONAME#*\>}
+AONAME=${AONAME%<*}
+popd > /dev/null
+
+### create firefox addon dir if needed and move new addon
+mkdir -p "$EXTENTIONS"
+if [ -d "$EXTENTIONS/$FFHASH" ]; then
+    echo "[firefox] addon $AONAME is already installed."
+else
+    mv "$ADDONDIR" "$EXTENTIONS/$FFHASH"
+    echo "[firefox] addon $AONAME installed to $EXTENTIONS/$FFHASH"
+fi
+
+exit 0
