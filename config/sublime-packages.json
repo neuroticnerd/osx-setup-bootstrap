@@ -3,14 +3,14 @@
     [
         "BracketHighlighter",
         "GenerateUUID",
+        "Git",
+        "GitGutter",
         "HexViewer",
         "PackageResourceViewer",
         "PlistJsonConverter",
         "Python Flake8 Lint",
         "Python Improved",
         "SideBarEnhancements",
-        "SideBarGit",
-        "Git",
-        "GitGutter"
+        "SideBarGit"
     ]
 }

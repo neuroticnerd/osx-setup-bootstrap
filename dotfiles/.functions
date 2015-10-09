@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+
+###
+function getfile() {
+    if [ -z "$2" ]; then
+        wget -nv $@
+    else
+        outputfile="$1" && shift
+        fileurl="$2" && shift
+        wget -nv -O "${outputfile}" $fileurl $@
+        return $?
+    fi
+}
+
+### prints a newline character
+function newline() {
+    printf "\n"
+}
+
+### reads a default using the defaults utility
+function defread() {
+    # $1 = domain, $2 = key
+    defaults read $1 $2
+}
+
+function pubpem() {
+    # $> pubpem keyfile.pem
+    openssl rsa -pubout -outform pem -in $@
+}
+
+function pubssh() {
+    # http://stackoverflow.com/questions/192249/how-do-i-parse-command-line-arguments-in-bash
+    local HELPTEXT="usage of pubssh:"
+    HELPTEXT="$HELPTEXT\n    pubssh keyfile [outputfile [comment]]"
+    pushd ~/.ssh > /dev/null
+
+    if [ ! -z "$1" ]; then
+        if [ "--help" = "$1" ]; then
+            echo -e "$HELPTEXT";
+        else
+            local PUBKEY=$(ssh-keygen -y -f $1);
+            if [ ! -z "$2" ]; then
+                printf "%s" "$PUBKEY" > $2;
+                if [ ! -z "$3" ]; then
+                    printf " %s\n" "$3" >> $2;
+                    PUBKEY="$PUBKEY $3"
+                fi
+                echo "### showing contents of ~/.ssh/$2 ###"
+                sudo cat $2
+                echo ""
+            else
+                echo $PUBKEY
+                echo -e "\nnothing written to file."
+            fi
+        fi
+    else
+        echo -e "$HELPTEXT";
+    fi
+
+    popd > /dev/null
+}
+
+function lsgrep() { ls $2 | grep $1; }
+
+function cdls() { cd "$@" && ls; }
+
+function gpip() { PIP_REQUIRE_VIRTUALENV="" pip "$@"; }
+
+### install a firefox extension based on mozilla id
+function ffinstall() {
+    ### get the addon identifier
+    ADDONID="$1"
+    if [ "$ADDONID" == "" ]; then
+        echo "ERROR: You must supply an identifier parameter!"
+        return 1
+    fi
+    shift
+    FFDIR="${HOME}/Library/Application Support/Firefox"
+    PROFILE="$2"
+    TMPDIR="/tmp/ffaddons"
+    ADDONDIR="$TMPDIR/$ADDONID"
+    ADDONURL="https://addons.mozilla.org/firefox/downloads/latest/$ADDONID/addon-$ADDONID-latest.xpi"
+    LOGFILE="ffaddon.log"
+    echo "[firefox] installing addon $ADDONID..."
+    echo "[firefox] installing addon $ADDONID..." > $LOGFILE
+
+    ### determine the profile directory
+    if [ "$PROFILE" == "" ]; then
+        PROFILEDIR=$(cat "${FFDIR}/profiles.ini" | sed -n -e 's/^.*Path=//p' | head -n 1)
+        EXTENTIONS="${FFDIR}/${PROFILEDIR}/extensions"
+        if [ -z "$PROFILEDIR" ]; then
+            open -a firefox -CreateProfile default_profile
+            echo $PROFILEDIR
+            echo "Cannot find Firefox profile directory"
+            return 1
+        fi
+    fi
+    echo "[firefox:profile] ${FFDIR}/${PROFILEDIR}"
+
+    ### clean up potential old addon directory
+    rm -rf $ADDONDIR
+    mkdir -p $ADDONDIR
+
+    ### download and unpack addon xpi then get hash id
+    pushd $ADDONDIR > /dev/null
+    wget -O extension.xpi $ADDONURL >> $LOGFILE 2>&1
+    unzip extension.xpi >> $LOGFILE 2>&1
+    rm extension.xpi
+    FFHASH=$(grep -m 1 -e em:id install.rdf)
+    FFHASH=${FFHASH#*\>}
+    FFHASH=${FFHASH%<*}
+    AONAME=$(grep -m 1 -e em:name install.rdf)
+    AONAME=${AONAME#*\>}
+    AONAME=${AONAME%<*}
+    popd > /dev/null
+
+    ### create firefox addon dir if needed and move new addon
+    mkdir -p "$EXTENTIONS"
+    if [ -d "$EXTENTIONS/$FFHASH" ]; then
+        echo "[firefox] addon $AONAME is already installed."
+    else
+        mv "$ADDONDIR" "$EXTENTIONS/$FFHASH"
+        echo "[firefox] addon $AONAME installed to $EXTENTIONS/$FFHASH"
+    fi
+
+    return 0
+}
