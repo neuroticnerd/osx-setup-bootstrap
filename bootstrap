@@ -2,10 +2,16 @@
 
 set -e
 LOGFILE="/tmp/osxbootstrap.log"
+
 GHURL="https://raw.githubusercontent.com/neuroticnerd/osx-setup-bootstrap/master"
 function ghget() {
     wget -O $1 $GHURL/$2 >> $LOGFILE 2>&1
     return $?
+}
+
+ECHO_PREFIX=""
+function xecho() {
+    echo "[$ECHO_PREFIX] $1"
 }
 
 sudo -v -p "Some commands may require sudo access, please enter your password:"
@@ -31,6 +37,14 @@ else
 fi
 printf "\n"
 
+### set user account icon
+ghget /tmp/Maru.tif static/boxcat.tif
+sudo cp -p /tmp/Maru.tif "/Library/User Pictures/Animals/Maru.tif"
+sudo chown root "/Library/User Pictures/Animals/Maru.tif"
+sudo dscl . delete /Users/$USER jpegphoto
+sudo dscl . delete /Users/$USER Picture
+sudo dscl . create /Users/$USER Picture "/Library/User Pictures/Animals/Maru.tif"
+# This forces the system to rebuild the system caches + local directory cache
 
 ###############################################################################
 # Dotfiles                                                                    #
@@ -58,6 +72,8 @@ newline
 ###############################################################################
 # Homebrew Setup                                                              #
 ###############################################################################
+### link apps to normal app location + easier to access caskroom
+export HOMEBREW_CASK_OPTS="--appdir=/Applications --caskroom=/opt/brew-cask"
 
 ### install/update homebrew
 if ! brew help &> /dev/null; then
@@ -78,10 +94,14 @@ brew tap caskroom/versions
 brew tap caskroom/fonts
 newline
 
+### install tuntap to avoid Yosemite errors about kext signing
+brew cask install tuntap
+
 ### install utilities
 echo "[brew] installing utilities..."
 brews=(
     opencv3
+    openvpn
     bash
     wget
     ack
@@ -90,11 +110,12 @@ brews=(
     coreutils
     findutils
     ffmpeg
+    imagemagick
     node
     trash
     brew-cask
     python
-)
+);
 brew install ${brews[@]}
 newline
 
@@ -134,15 +155,18 @@ applications=(
     gpgtools
     flash
     flash-player
-    #pycharm
-    #charles
-    #easyfind
-)
+    mumble
+    gfxcardstatus
+    charles
+    easyfind
+);
 brew cask install ${applications[@]}
 brew cask cleanup
 newline
 
 ### cleanup and display brew doctor output
+echo "[brew] cleaning up..."
+brew upgrade
 brew cleanup --force
 brew doctor
 newline
@@ -165,180 +189,443 @@ newline
 # Firefox Configuration                                                       #
 ###############################################################################
 
-echo "[firefox] configuring firefox..."
+function ffinstall() {
+    ### install a firefox extension based on mozilla id
+    ### get the addon identifier
+    ADDONID="$1"
+    if [ "$ADDONID" == "" ]; then
+        xecho "ERROR: You must supply an identifier parameter!"
+        return 1
+    fi
+    shift
+    FFDIR="${HOME}/Library/Application Support/Firefox"
+    PROFILE="$2"
+    TMPDIR="/tmp/ffaddons"
+    ADDONDIR="$TMPDIR/$ADDONID"
+    ADDONURL="https://addons.mozilla.org/firefox/downloads/latest/$ADDONID/addon-$ADDONID-latest.xpi"
+    xecho "getting extension info for $ADDONID..."
 
-### install adblock plus extension
-ffinstall 1865
+    ### determine the profile directory
+    if [ "$PROFILE" == "" ]; then
+        PROFILEDIR=$(cat "${FFDIR}/profiles.ini" | sed -n -e 's/^.*Path=//p' | head -n 1)
+        EXTENTIONS="${FFDIR}/${PROFILEDIR}/extensions"
+        if [ -z "$PROFILEDIR" ]; then
+            open -a firefox -CreateProfile default_profile
+            xecho $PROFILEDIR
+            xecho "Cannot find Firefox profile directory"
+            return 1
+        fi
+    fi
+    #xecho "profile = ${FFDIR}/${PROFILEDIR}"
 
-### install noscript extension
-ffinstall 722
+    ### clean up potential old addon directory
+    rm -rf $ADDONDIR
+    mkdir -p $ADDONDIR
 
-### install lastpass extension
-ffinstall 8542
+    ### download and unpack addon xpi then get hash id
+    pushd $ADDONDIR > /dev/null
+    wget -O extension.xpi $ADDONURL &> /dev/null
+    unzip extension.xpi &> /dev/null
+    rm extension.xpi
+    AONAME=$(grep -m 1 -e em:name install.rdf || grep -m 1 -e name install.rdf)
+    AONAME=${AONAME#*\>}
+    AONAME=${AONAME%<*}
+    FFHASH=$(grep -m 1 -e em:id install.rdf || grep -m 1 -e id install.rdf)
+    FFHASH=${FFHASH#*\>}
+    FFHASH=${FFHASH%<*}
+    popd > /dev/null
+
+    ### create firefox addon dir if needed and move new addon
+    xecho "installing $AONAME $FFHASH..."
+    mkdir -p "$EXTENTIONS"
+    if [ -d "$EXTENTIONS/$FFHASH" ]; then
+        xecho "addon $AONAME is already installed."
+    else
+        mv "$ADDONDIR" "$EXTENTIONS/$FFHASH"
+        xecho "addon $AONAME installed."
+    fi
+
+    return 0
+}
+
+function firefox_extensions() {
+    ECHO_PREFIX="firefox:extensions"
+    ffinstall 607454  # uBlock Origin
+    ffinstall 722  # NoScript
+    ffinstall 8542  # LastPass
+    ffinstall 1843  # FireBug
+    ffinstall 748  # GreaseMonkey
+
+    #ffinstall 6623 # BetterPrivacy
+    # video downloadhelper
+}
+ECHO_PREFIX="firefox"
+xecho "configuring firefox..."
+firefox_extensions
+newline
 
 
 ###############################################################################
 # Configure Sublime Text                                                      #
 ###############################################################################
 
-echo "[sublime] configuring sublime text..."
+ECHO_PREFIX="sublime"
 STCONF="${HOME}/Library/Application Support/Sublime Text 3"
+xecho "configuring sublime text..."
 
 ### enable access to the provided subl cli
-echo "[sublime] ensuring subl command is available..."
+xecho "ensuring subl command is available..."
 if [ ! -f "/usr/local/bin/subl" ]; then
     LNSUBL="/Applications/Sublime Text.app/Contents/SharedSupport/bin/subl"
     ln -s "$LNSUBL" /usr/local/bin/subl
 fi
-newline
 
 ### deploy user preferences
-echo "[sublime] deploying user preferences..."
+xecho "deploying user preferences..."
 USERCONF_FILE="$STCONF/Packages/User/Preferences.sublime-settings"
 CONF_URL="https://gist.githubusercontent.com/neuroticnerd/130577d9fe737fa2ab13/raw/sublime-user-settings.json"
 wget -nv -O "$USERCONF_FILE" $CONF_URL
-newline
 
 ### enable package control
-echo "[sublime] downloading package control..."
+xecho "downloading package control..."
 PKGFILE="$STCONF/Installed Packages/Package Control.sublime-package"
 PKGURL="https://packagecontrol.io/Package%20Control.sublime-package"
 wget -nv -O "$PKGFILE" $PKGURL
-newline
 
 ### configure sublime packages
-echo "[sublime] configuring sublime packages..."
+xecho "configuring sublime packages..."
 PKGCONF="$STCONF/Packages/User/Package Control.sublime-settings"
 CONF_URL="$GHURL/config/sublime-packages.json"
 wget -nv -O "$PKGCONF" $CONF_URL
+
+xecho "make sublime the default plaintext program"
+ST3HANDLER="{LSHandlerContentType=public.plain-text;LSHandlerRoleAll=com.sublimetext.3;}"
+defaults write com.apple.LaunchServices LSHandlers -array-add "$ST3HANDLER"
+
 newline
 
 
 ###############################################################################
 # OS X Defaults/Preferences                                                   #
 ###############################################################################
-echo "[osx] configuring OS X preferences and defaults..."
 
-echo "[osx:finder] show hidden files by default"
-defaults write com.apple.finder AppleShowAllFiles -bool true
+ECHO_PREFIX="osx"
+xecho "configuring OS X preferences and defaults..."
 
-echo "[osx:finder] always show full posix path"
-defaults write com.apple.finder _FXShowPosixPathInTitle -bool YES
+function configure_finder() {
+    ECHO_PREFIX="osx:finder"
 
-echo "[osx:finder] show all filename extensions"
-defaults write NSGlobalDomain AppleShowAllExtensions -bool true
+    xecho "show hidden files by default"
+    defaults write com.apple.finder AppleShowAllFiles -bool true
 
-echo "[osx:finder] default to column view"
-defaults write com.apple.Finder FXPreferredViewStyle clmv
+    xecho "show path bar"
+    defaults write com.apple.finder ShowPathbar -bool true
 
-echo "[osx:finder] show status bar"
-defaults write com.apple.finder ShowStatusBar -bool true
+    xecho "always show full posix path"
+    defaults write com.apple.finder _FXShowPosixPathInTitle -bool YES
 
-echo "[osx:finder] allow text selection in Quick Look"
-defaults write com.apple.finder QLEnableTextSelection -bool true
+    xecho "show all filename extensions"
+    defaults write NSGlobalDomain AppleShowAllExtensions -bool true
 
-echo "[osx:finder] disable the warning when changing a file extension"
-defaults write com.apple.finder FXEnableExtensionChangeWarning -bool false
+    xecho "default to column view in finder windows"
+    defaults write com.apple.Finder FXPreferredViewStyle clmv
 
-echo "[osx:mouse] set tracking speed of mouse"
-defaults write -g com.apple.mouse.scaling 2.4
+    xecho "show status bar"
+    defaults write com.apple.finder ShowStatusBar -bool true
 
-echo "[osx:mouse] tracking mouse follow in terminal"
-defaults write com.apple.terminal FocusFollowsMouse -string true
+    xecho "allow text selection in Quick Look"
+    defaults write com.apple.finder QLEnableTextSelection -bool true
 
-echo "[osx:login] show basic system info at login"
-sudo defaults write /Library/Preferences/com.apple.loginwindow AdminHostInfo HostName
+    xecho "disable the warning when changing a file extension"
+    defaults write com.apple.finder FXEnableExtensionChangeWarning -bool false
 
-echo "[osx:desktop] enable snap-to-grid for desktop"
-PLISTFILE="${HOME}/Library/Preferences/com.apple.finder.plist"
-STG_DESKTOP=":DesktopViewSettings:IconViewSettings:arrangeBy"
-STG_FK_VIEW=":FK_StandardViewSettings:IconViewSettings:arrangeBy"
-STG_STANDARD=":StandardViewSettings:IconViewSettings:arrangeBy"
-if ! /usr/libexec/PlistBuddy -c "Set $STG_DESKTOP grid" $PLISTFILE; then
-    /usr/libexec/PlistBuddy -c "Add $STG_DESKTOP string grid" $PLISTFILE
-fi
-if ! /usr/libexec/PlistBuddy -c "Set $STG_FK_VIEW grid" $PLISTFILE; then
-    /usr/libexec/PlistBuddy -c "Add $STG_FK_VIEW string grid" $PLISTFILE
-fi
-if ! /usr/libexec/PlistBuddy -c "Set $STG_STANDARD grid" $PLISTFILE; then
-    /usr/libexec/PlistBuddy -c "Add $STG_STANDARD string grid" $PLISTFILE
-fi
+    # Set Desktop as the default location for new Finder windows
+    # For other paths, use `PfLo` and `file:///full/path/here/`
+    xecho "default new finder windows to \${HOME}"
+    defaults write com.apple.finder NewWindowTarget -string "PfHm"
+    #defaults write com.apple.finder NewWindowTargetPath -string "file://${HOME}/"
 
-echo "[osx:trackpad] enable tap-to-click"
-defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad Clicking -bool true
-defaults write NSGlobalDomain com.apple.mouse.tapBehavior -int 1
-defaults -currentHost write NSGlobalDomain com.apple.mouse.tapBehavior -int 1
+    xecho "search current folder by default"
+    defaults write com.apple.finder FXDefaultSearchScope -string "SCcf"
 
-echo "[osx:trackpad] map bottom right corner to right-click"
-defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad TrackpadCornerSecondaryClick -int 2
-defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad TrackpadRightClick -bool true
-defaults -currentHost write NSGlobalDomain com.apple.trackpad.trackpadCornerClickBehavior -int 1
-defaults -currentHost write NSGlobalDomain com.apple.trackpad.enableSecondaryClick -bool true
+    xecho "do not create .DS_Store files on network volumes"
+    defaults write com.apple.desktopservices DSDontWriteNetworkStores -bool true
 
-echo "[osx:scrolling] disable unnatural 'natural' scrolling"
-defaults write NSGlobalDomain com.apple.swipescrolldirection -bool false
+    xecho "show the ~/Library folder"
+    chflags nohidden ~/Library
 
-echo "[osx:scrolling] always show scroll bars"
-defaults write NSGlobalDomain AppleShowScrollBars -string “Always”
+    xecho "expanded save panel by default"
+    defaults write NSGlobalDomain NSNavPanelExpandedStateForSaveMode -bool true
+    defaults write NSGlobalDomain NSNavPanelExpandedStateForSaveMode2 -bool true
 
-echo "[osx:menubar] show percentage on battery"
-defaults write com.apple.menuextra.battery ShowPercent -string "YES"
+    xecho "expanded print panel by default"
+    defaults write NSGlobalDomain PMPrintingExpandedStateForPrint -bool true
+    defaults write NSGlobalDomain PMPrintingExpandedStateForPrint2 -bool true
 
-echo "[osx:menubar] show volume in menu bar"
-defaults write com.apple.systemuiserver menuExtras -array "/System/Library/CoreServices/Menu Extras/Bluetooth.menu" "/System/Library/CoreServices/Menu Extras/AirPort.menu" "/System/Library/CoreServices/Menu Extras/Battery.menu" "/System/Library/CoreServices/Menu Extras/Clock.menu"
+    xecho "expand general, open with, and sharing panes by default"
+    defaults write com.apple.finder FXInfoPanesExpanded -dict General -bool true OpenWith -bool true Privileges -bool true
 
-echo "[osx:systemui] expanded save panel by default"
-defaults write NSGlobalDomain NSNavPanelExpandedStateForSaveMode -bool true
-defaults write NSGlobalDomain NSNavPanelExpandedStateForSaveMode2 -bool true
+    xecho "empty trash securely by default"
+    defaults write com.apple.finder EmptyTrashSecurely -bool true
 
-echo "[osx:systemui] expanded print panel by default"
-defaults write NSGlobalDomain PMPrintingExpandedStateForPrint -bool true
-defaults write NSGlobalDomain PMPrintingExpandedStateForPrint2 -bool true
+}
 
-echo "[osx:systemui] disable the “Are you sure you want to open this application?” dialog"
-defaults write com.apple.LaunchServices LSQuarantine -bool false
+function configure_ui() {
+    ECHO_PREFIX="osx:ui"
 
-echo "[osx:systemui] enable full keyboard access for all controls"
-defaults write NSGlobalDomain AppleKeyboardUIMode -int 3
+    xecho "show basic system info at login"
+    sudo defaults write /Library/Preferences/com.apple.loginwindow AdminHostInfo HostName
 
-echo "[osx:updates] check for software updates daily"
-defaults write com.apple.SoftwareUpdate ScheduleFrequency -int 1
+    xecho "enable snap-to-grid for desktop"
+    PLISTFILE="${HOME}/Library/Preferences/com.apple.finder.plist"
+    STG_DESKTOP=":DesktopViewSettings:IconViewSettings:arrangeBy"
+    STG_FK_VIEW=":FK_StandardViewSettings:IconViewSettings:arrangeBy"
+    STG_STANDARD=":StandardViewSettings:IconViewSettings:arrangeBy"
+    if ! /usr/libexec/PlistBuddy -c "Set $STG_DESKTOP grid" $PLISTFILE; then
+        /usr/libexec/PlistBuddy -c "Add $STG_DESKTOP string grid" $PLISTFILE
+    fi
+    if ! /usr/libexec/PlistBuddy -c "Set $STG_FK_VIEW grid" $PLISTFILE; then
+        /usr/libexec/PlistBuddy -c "Add $STG_FK_VIEW string grid" $PLISTFILE
+    fi
+    if ! /usr/libexec/PlistBuddy -c "Set $STG_STANDARD grid" $PLISTFILE; then
+        /usr/libexec/PlistBuddy -c "Add $STG_STANDARD string grid" $PLISTFILE
+    fi
 
-echo "[osx:input] disable smart quotes and smart dashes"
-defaults write NSGlobalDomain NSAutomaticQuoteSubstitutionEnabled -bool false
-defaults write NSGlobalDomain NSAutomaticDashSubstitutionEnabled -bool false
+    xecho "show percentage on battery"
+    defaults write com.apple.menuextra.battery ShowPercent -string "YES"
 
-echo "[osx:screen] require password immediately after sleep or screen saver begins"
-defaults write com.apple.screensaver askForPassword -int 1
-defaults write com.apple.screensaver askForPasswordDelay -int 0
+    xecho "show volume in menu bar"
+    menubaritems=(
+        "/System/Library/CoreServices/Menu Extras/AirPort.menu"
+        "/System/Library/CoreServices/Menu Extras/Battery.menu"
+        "/System/Library/CoreServices/Menu Extras/Clock.menu"
+        "/System/Library/CoreServices/Menu Extras/Volume.menu"
+    )
+    defaults write com.apple.systemuiserver menuExtras -array ${menubaritems[@]}
 
-echo "[osx:screenshots] set screenshot format"
-defaults write com.apple.screencapture type -string “png”
+    xecho "disable the “Are you sure you want to open this application?” dialog"
+    defaults write com.apple.LaunchServices LSQuarantine -bool false
 
-echo "[osx:screenshots] change screenshot save location"
-defaults write com.apple.screencapture location ~/screenshots
+    xecho "require password immediately after sleep/screen saver begins"
+    defaults write com.apple.screensaver askForPassword -int 1
+    defaults write com.apple.screensaver askForPasswordDelay -int 0
 
-echo "[osx:screenshots] disable screenshot shadows"
-defaults write com.apple.screencapture disable-shadow -bool true
+    xecho "enable subpixel font rendering on non-Apple LCDs"
+    defaults write NSGlobalDomain AppleFontSmoothing -int 2
+}
 
-### [osx:plaintext]: make sublime the default plaintext program
-#defaults write com.apple.LaunchServices LSHandlers -array-add '{LSHandlerContentType=public.plain-text;LSHandlerRoleAll=com.sublimetext.3;}'
+function configure_input() {
+    ECHO_PREFIX="osx:input"
+    APPLETPAD="com.apple.AppleMultitouchTrackpad"
+    DRIVERTPAD="com.apple.driver.AppleBluetoothMultitouch.trackpad"
 
-# Enable subpixel font rendering on non-Apple LCDs
-#defaults write NSGlobalDomain AppleFontSmoothing -int 2
-# Enable HiDPI display modes (requires restart)
-#sudo defaults write /Library/Preferences/com.apple.windowserver DisplayResolutionEnabled -bool true
+    xecho "set tracking speed of mouse"
+    defaults write -g com.apple.mouse.scaling 2.4
 
-# Set a custom wallpaper image. `DefaultDesktop.jpg` is already a symlink, and
-# all wallpapers are in `/Library/Desktop Pictures/`. The default is `Wave.jpg`.
-#rm -rf ~/Library/Application Support/Dock/desktoppicture.db
-#sudo rm -rf /System/Library/CoreServices/DefaultDesktop.jpg
-#sudo ln -s /path/to/your/image /System/Library/CoreServices/DefaultDesktop.jpg
+    xecho "tracking mouse follow off in terminal"
+    defaults write com.apple.terminal FocusFollowsMouse -string false
+
+    xecho "enable tap-to-click for this user and login screen"
+    defaults write $APPLETPAD Clicking -bool true
+    defaults write $DRIVERTPAD Clicking -bool true
+    defaults write NSGlobalDomain com.apple.mouse.tapBehavior -int 1
+    defaults -currentHost write NSGlobalDomain com.apple.mouse.tapBehavior -int 1
+
+    xecho "trackpad right-click settings"
+    defaults write $APPLETPAD TrackpadRightClick -bool true
+    defaults write $APPLETPAD TrackpadCornerSecondaryClick -int 2
+    defaults write $DRIVERTPAD TrackpadRightClick -bool true
+    defaults write $DRIVERTPAD TrackpadCornerSecondaryClick -int 2
+    #defaults -currentHost write NSGlobalDomain com.apple.trackpad.trackpadCornerClickBehavior -int 1
+    #defaults -currentHost write NSGlobalDomain com.apple.trackpad.enableSecondaryClick -bool true
+
+    xecho "disable unnatural 'natural' scrolling"
+    defaults write NSGlobalDomain com.apple.swipescrolldirection -bool false
+
+    xecho "always show scroll bars"
+    defaults write NSGlobalDomain AppleShowScrollBars -string “Always”
+
+    xecho "disable smart quotes and smart dashes"
+    defaults write NSGlobalDomain NSAutomaticQuoteSubstitutionEnabled -bool false
+    defaults write NSGlobalDomain NSAutomaticDashSubstitutionEnabled -bool false
+
+    xecho "disable annoying auto-correct behavior"
+    defaults write NSGlobalDomain NSAutomaticSpellingCorrectionEnabled -bool false
+
+    xecho "enable full keyboard access for all controls"
+    defaults write NSGlobalDomain AppleKeyboardUIMode -int 3
+}
+
+function configure_screenshots() {
+    ECHO_PREFIX="osx:screenshots"
+
+    xecho "set screenshot format"
+    defaults write com.apple.screencapture type -string “png”
+
+    xecho "change screenshot save location"
+    defaults write com.apple.screencapture location ~/screenshots
+
+    xecho "disable screenshot shadows"
+    defaults write com.apple.screencapture disable-shadow -bool true
+}
+
+function dockadd() {
+    appstring="<dict><key>tile-data</key><dict><key>file-data</key><dict><key>_CFURLString</key><string>$1</string><key>_CFURLStringType</key><integer>0</integer></dict></dict></dict>"
+    defaults write com.apple.dock 'persistent-apps' -array-add "$appstring"
+    xecho "added $1"
+}
+function configure_dock() {
+    ECHO_PREFIX="osx:dock"
+
+    xecho "remove default dock icons"
+    defaults write com.apple.dock persistent-apps -array ""
+    # http://hints.macworld.com/article.php?story=20040819170450489
+    #defaults write com.apple.dock 'checked-for-launchpad' -bool true
+
+    xecho "adding custom dock icon set..."
+    dockadd "/Applications/Launchpad.app/"
+    dockadd "/Applications/Firefox.app/"
+    dockadd "/Applications/Sublime Text.app/"
+    dockadd "/Applications/SourceTree.app/"
+    dockadd "/Applications/SmartGit.app/"
+    dockadd "/Applications/Slack.app/"
+    dockadd "/Applications/HipChat.app/"
+    dockadd "/Applications/iTerm.app/"
+    dockadd "/Applications/Utilities/Terminal.app/"
+    dockadd "/Applications/VLC.app/"
+    dockadd "/Applications/x2goclient.app/"
+    dockadd "/Applications/Calculator.app/"
+    dockadd "/Applications/System Preferences.app/"
+    dockadd "/Applications/Utilities/Activity Monitor.app/"
+
+    xecho "add a spacer to the left side of the Dock (where the applications are)"
+    defaults write com.apple.dock 'persistent-apps' -array-add '{tile-data={}; tile-type="spacer-tile";}'
+
+    xecho "add a spacer to the right side of the Dock (where the Trash is)"
+    defaults write com.apple.dock 'persistent-others' -array-add '{tile-data={}; tile-type="spacer-tile";}'
+
+    #xecho "add the dropbox folder to persistent-others"
+    #defaults write com.apple.dock 'persistent-others' -array-add "<dict><key>tile-data</key><dict><key>arrangement</key><integer>0</integer><key>displayas</key><integer>1</integer><key>file-data</key><dict><key>_CFURLString</key><string>$HOME/Dropbox/</string><key>_CFURLStringType</key><integer>0</integer></dict><key>preferreditemsize</key><integer>-1</integer><key>showas</key><integer>3</integer></dict><key>tile-type</key><string>directory-tile</string></dict>"
+
+    xecho "remove auto-hide delay on the dock"
+    defaults write com.apple.dock 'autohide-delay' -float 0
+
+    xecho "remove the animation when hiding/showing the Dock"
+    defaults write com.apple.dock 'autohide-time-modifier' -float 0
+
+    xecho "automatically hide and show the Dock"
+    defaults write com.apple.dock 'autohide' -bool true
+
+    xecho "set the icon size of Dock items"
+    defaults write com.apple.dock tilesize -int 36
+
+    xecho "show indicator lights for open applications in the Dock"
+    defaults write com.apple.dock show-process-indicators -bool true
+}
+
+function configure_hot_corners() {
+    ECHO_PREFIX="osx:hot_corners"
+    ### hot corners
+    # possible values:
+    #  0: no-op
+    #  2: Mission Control
+    #  3: Show application windows
+    #  4: Desktop
+    #  5: Start screen saver
+    #  6: Disable screen saver
+    #  7: Dashboard
+    # 10: Put display to sleep
+    # 11: Launchpad
+    # 12: Notification Center
+
+    xecho "set bottom right screen corner --> desktop"
+    defaults write com.apple.dock wvous-br-corner -int 4
+    defaults write com.apple.dock wvous-br-modifier -int 0
+
+    xecho "set top right screen corner --> screen saver"
+    defaults write com.apple.dock wvous-tr-corner -int 5
+    defaults write com.apple.dock wvous-tr-modifier -int 0
+}
+
+function configure_activity_monitor() {
+    ECHO_PREFIX="osx:activity_monitor"
+
+    xecho "show the main window when launching Activity Monitor"
+    defaults write com.apple.ActivityMonitor OpenMainWindow -bool true
+
+    xecho "visualize CPU usage in the Activity Monitor Dock icon"
+    defaults write com.apple.ActivityMonitor IconType -int 5
+
+    xecho "show all processes in Activity Monitor"
+    defaults write com.apple.ActivityMonitor ShowCategory -int 0  # 100?
+
+    xecho "sort Activity Monitor results by CPU usage"
+    defaults write com.apple.ActivityMonitor SortColumn -string “CPUUsage”
+    defaults write com.apple.ActivityMonitor SortDirection -int 0
+
+    xecho "set updates to be more frequent"
+    defaults write com.apple.ActivityMonitor UpdatePeriod -int 1
+}
+
+function configure_terminal() {
+    # terminal and iterm2
+    # Only use UTF-8 in Terminal.app
+    defaults write com.apple.terminal StringEncodings -array 4
+    # Use a modified version of the Solarized Dark theme by default in Terminal.app
+    TERM_PROFILE=’Solarized Dark xterm-256color’;
+    CURRENT_PROFILE=”$(defaults read com.apple.terminal ‘Default Window Settings’)”;
+    if [ “${CURRENT_PROFILE}” != “${TERM_PROFILE}” ]; then
+    open “${HOME}/init/${TERM_PROFILE}.terminal”;
+    sleep 1; # Wait a bit to make sure the theme is loaded
+    defaults write com.apple.terminal ‘Default Window Settings’ -string “${TERM_PROFILE}”;
+    defaults write com.apple.terminal ‘Startup Window Settings’ -string “${TERM_PROFILE}”;
+    fi;
+    # Enable “focus follows mouse” for Terminal.app and all X11 apps
+    # i.e. hover over a window and start typing in it without clicking first
+    #defaults write com.apple.terminal FocusFollowsMouse -bool true
+    #defaults write org.x.X11 wm_ffm -bool true
+    # Install the Solarized Dark theme for iTerm
+    open “${HOME}/init/Solarized Dark.itermcolors”
+    # Don’t display the annoying prompt when quitting iTerm
+    defaults write com.googlecode.iterm2 PromptOnQuit -bool false
+}
+
+function configure_misc() {
+    ECHO_PREFIX="osx:general"
+    xecho "check for software updates daily"
+    defaults write com.apple.SoftwareUpdate ScheduleFrequency -int 1
+
+    xecho "minimize window with double-click in title bar"
+    defaults write NSGlobalDomain AppleMiniaturizeOnDoubleClick -bool true
+
+    # Enable HiDPI display modes (requires restart)
+    #sudo defaults write /Library/Preferences/com.apple.windowserver DisplayResolutionEnabled -bool true
+
+    # Set a custom wallpaper image. `DefaultDesktop.jpg` is already a symlink, and
+    # all wallpapers are in `/Library/Desktop Pictures/`. The default is `Wave.jpg`.
+    #rm -rf ~/Library/Application Support/Dock/desktoppicture.db
+    #sudo rm -rf /System/Library/CoreServices/DefaultDesktop.jpg
+    #sudo ln -s /path/to/your/image /System/Library/CoreServices/DefaultDesktop.jpg
+    #sqlite3 "~/Library/Application\ Support/Dock/desktoppicture.db" "update data set value = '/path/to/any/picture.png'";
+    #killall Dock;
+}
+
+configure_finder
+configure_ui
+configure_input
+configure_screenshots
+configure_dock
+configure_hot_corners
+configure_activity_monitor
+#configure_terminal
+configure_misc
 
 
-echo "[osx] resetting Finder..."
-# reset finder
-killall Finder
+ECHO_PREFIX="osx"
+xecho "flushing preference cache, Dock, and Finder..."
+killall cfprefsd
+killall -KILL Finder
+killall -KILL Dock
 
 
 ###############################################################################
@@ -346,3 +633,5 @@ killall Finder
 ###############################################################################
 echo "[bootstrap] done. Please restart for all changes to take effect!"
 #sudo shutdown -r now
+exit 0
+
