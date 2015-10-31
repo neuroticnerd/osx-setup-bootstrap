@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+function zznano() { zero $@ && sunano $@; }
+
 ###
 function getfile() {
     if [ -z "$2" ]; then

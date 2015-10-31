@@ -9,64 +9,139 @@ function ghget() {
     return $?
 }
 
-ECHO_PREFIX=""
-function xecho() {
-    echo "[$ECHO_PREFIX] $1"
+# ANSI colors you can use
+black='\033[0;30m'
+white='\033[0;37m'
+red='\033[0;31m'
+green='\033[0;32m'
+yellow='\033[0;33m'
+blue='\033[0;34m'
+magenta='\033[0;35m'
+cyan='\033[0;36m'
+reset=$(tput sgr0)
+
+### confirmation function
+function confirm() {
+    #read -r -p "Are you sure? [y/N] " response
+    #case $response in
+    #    [yY][eE][sS]|[yY])
+    #        do_something
+    #        ;;
+    #    *)
+    #        do_something_else
+    #        ;;
+    #esac
+    # $1 variable to store the boolean result in
+    # $2 (optional) message to display
+    local __globalvarname="$1"
+    shift
+    if [ -z "$1" ]; then
+        local __message="Are you sure? [y/N] "
+    else
+        local __message="$1 "
+    fi
+    local __confirmresponse
+    read -r -p "$__message" __confirmresponse
+    if [[ $__confirmresponse =~ ^([yY][eE][sS]|[yY])$ ]]
+    then
+        eval $__globalvarname=true
+    else
+        eval $__globalvarname=false
+    fi
 }
 
-sudo -v -p "Some commands may require sudo access, please enter your password:"
-echo "[init] running osx bootstrap script" > $LOGFILE
-echo "[bootstrap] setting up OS X..."
+# set colored text to global var
+ctext() {
+    local  __globalvarname="$3"
+    local  ctextresult="${1}${2}${reset}"
+    eval $__globalvarname="'$ctextresult'"
+    return
+}
+
+# extended echo
+ECHO_PREFIX=""
+ECHO_PREFIX_COLOR=$green
+function xecho() {
+    ctext $ECHO_PREFIX_COLOR "[${ECHO_PREFIX}]" prefix
+    if [ -z "$2" ]; then
+        message="$1"
+    else
+        ctext $1 $2 message
+    fi
+    echo -e "${prefix} ${message}"
+}
+
+ECHO_PREFIX="bootstrap"
+ctext $blue "\n###############################################################################\n" bootstrap_lbreak
+echo -e "${bootstrap_lbreak}"
+xecho "setting up OS X..."
+sudo -v -p "Some commands may require sudo access, please enter your password: "
 
 ###############################################################################
 # Initial Setup                                                               #
 ###############################################################################
 
-### make sure xcode utilities are installed
-if ! xcode-select -p &> /dev/null; then
-    echo "[xcode] installing xcode command line utilities..."
-    touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress;
-    PROD=$(softwareupdate -l |
-      grep "\*.*Command Line" |
-      head -n 1 | awk -F"*" '{print $2}' |
-      sed -e 's/^ *//' |
-      tr -d '\n')
-    softwareupdate -i "$PROD" -v;
-else
-    echo "[xcode] xcode command line utilities already installed."
-fi
-printf "\n"
+### make sure xcode command line utilities are installed
+function ensure_xcode_tools() {
+    ECHO_PREFIX="xcode"
+    if ! xcode-select -p &> /dev/null; then
+        xecho "installing xcode command line utilities..."
+        touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress;
+        PROD=$(softwareupdate -l |
+          grep "\*.*Command Line" |
+          head -n 1 | awk -F"*" '{print $2}' |
+          sed -e 's/^ *//' |
+          tr -d '\n')
+        softwareupdate -i "$PROD" -v;
+    else
+        xecho "xcode command line utilities already installed."
+    fi
+    printf "\n"
+}
 
 ### set user account icon
-ghget /tmp/Maru.tif static/boxcat.tif
-sudo cp -p /tmp/Maru.tif "/Library/User Pictures/Animals/Maru.tif"
-sudo chown root "/Library/User Pictures/Animals/Maru.tif"
-sudo dscl . delete /Users/$USER jpegphoto
-sudo dscl . delete /Users/$USER Picture
-sudo dscl . create /Users/$USER Picture "/Library/User Pictures/Animals/Maru.tif"
-# This forces the system to rebuild the system caches + local directory cache
+function user_account_icon() {
+    ghget /tmp/Maru.tif static/boxcat.tif
+    sudo cp -p /tmp/Maru.tif "/Library/User Pictures/Animals/Maru.tif"
+    sudo chown root "/Library/User Pictures/Animals/Maru.tif"
+    sudo dscl . delete /Users/$USER jpegphoto
+    sudo dscl . delete /Users/$USER Picture
+    sudo dscl . create /Users/$USER Picture "/Library/User Pictures/Animals/Maru.tif"
+    # This forces the system to rebuild the system caches + local directory cache
+    #kextcache -system-caches
+}
+
+ensure_xcode_tools
+user_account_icon
+
 
 ###############################################################################
 # Dotfiles                                                                    #
 ###############################################################################
 
-### install bash profile and functions
-echo "[dotfiles] deploying dotfiles..."
 function dldotfile() {
     # $1 = local location
     # $2 = remote relative location
     if ghget "$1" $2; then
-        echo "[dotfiles] deployed $1"
+        xecho "deployed $1"
     else
-        echo "[dotfiles] ERROR: could not obtain $2"
+        xecho "ERROR: could not obtain $2"
         exit 1
     fi
 }
-dldotfile ~/.functions dotfiles/.functions
-dldotfile ~/.bash_profile dotfiles/.bash_profile
-source ~/.bash_profile
-echo "[dotfiles] done."
-newline
+
+### install bash profile and functions
+function deploy_dotfiles() {
+    ECHO_PREFIX="dotfiles"
+    xecho "deploying dotfiles..."
+    dldotfile ~/.functions dotfiles/.functions
+    dldotfile ~/.bash_profile dotfiles/.bash_profile
+    source ~/.bash_profile
+    xecho "done."
+    newline
+}
+
+deploy_dotfiles
 
 
 ###############################################################################
@@ -75,119 +150,174 @@ newline
 ### link apps to normal app location + easier to access caskroom
 export HOMEBREW_CASK_OPTS="--appdir=/Applications --caskroom=/opt/brew-cask"
 
-### install/update homebrew
-if ! brew help &> /dev/null; then
-    echo "[brew] installing homebrew..."
-    ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
-    brew doctor
-else
-    echo "[brew] updating homebrew..."
-    brew update && brew upgrade
-fi
-newline
+### install/upgrade homebrew
+function brew_install_upgrade() {
+    ECHO_PREFIX="brew"
+    if ! brew help &> /dev/null; then
+        xecho "installing homebrew..."
+        ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
+        brew doctor
+    else
+        xecho "updating homebrew..."
+        brew update && brew upgrade
+    fi
+    newline
+}
 
 ### install necessary taps
-echo "[brew] opening brew taps..."
-brew tap homebrew/science
-brew tap caskroom/cask
-brew tap caskroom/versions
-brew tap caskroom/fonts
-newline
+function brew_taps() {
+    ECHO_PREFIX="brew"
+    xecho "opening brew taps..."
+    brew tap homebrew/science
+    brew tap caskroom/cask
+    brew tap caskroom/versions
+    brew tap caskroom/fonts
+    newline
+}
 
-### install tuntap to avoid Yosemite errors about kext signing
-echo "[brew] install tuntap now via cask to avoid Yosemite signing errors..."
-brew cask install tuntap
-newline
+### install tuntap via cask to avoid Yosemite errors about kext signing
+function brew_tuntap() {
+    ECHO_PREFIX="brew"
+    xecho "install tuntap now via cask to avoid Yosemite signing errors..."
+    brew install brew-cask
+    brew cask install tuntap
+    newline
+}
 
 ### install utilities
-echo "[brew] installing utilities..."
-brews=(
-    opencv3
-    openvpn
-    bash
-    wget
-    ack
-    ffind
-    autoenv
-    coreutils
-    findutils
-    ffmpeg
-    imagemagick
-    node
-    trash
-    brew-cask
-    python
-);
-brew install ${brews[@]}
-newline
+function brew_install_utils() {
+    ECHO_PREFIX="brew"
+    xecho "installing utilities..."
+    brews=(
+        opencv3
+        openvpn
+        bash
+        wget
+        ack
+        aspell
+        ffind
+        autoenv
+        coreutils
+        findutils
+        ffmpeg
+        imagemagick
+        iftop
+        node
+        trash
+        brew-cask
+        python
+        dnsmasq
+        autossh
+        dos2unix
+        netcat6
+        gnu-sed
+        gnu-tar
+        gawk
+    );
+    brew install ${brews[@]}
+    newline
+}
 
 ### install main software
-echo "[brew] installing core software..."
-applications=(
-    firefox
-    google-chrome
-    google-drive
-    google-hangouts
-    lastpass
-    1password
-    virtualbox
-    vagrant
-    sublime-text3
-    smartgit
-    sourcetree
-    kdiff3
-    slack
-    hipchat
-    dropbox
-    cog
-    vlc
-    the-unarchiver
-    alfred
-    gimp
-    xquartz
-    x2goclient
-    transmit
-    java
-    eclipse-java
-    clamxav
-    evernote
-    spotify
-    spotify-notifications
-    iterm2
-    gpgtools
-    flash
-    flash-player
-    mumble
-    gfxcardstatus
-    charles
-    easyfind
-    little-snitch
-);
-brew cask install ${applications[@]}
-brew cask cleanup
-newline
+function brew_install_apps() {
+    ECHO_PREFIX="brew"
+    xecho "installing core software..."
+    applications=(
+        firefox
+        google-chrome
+        google-drive
+        google-hangouts
+        lastpass
+        1password
+        virtualbox
+        vagrant
+        sublime-text3
+        smartgit
+        sourcetree
+        kdiff3
+        slack
+        hipchat
+        dropbox
+        cog
+        vlc
+        the-unarchiver
+        alfred
+        gimp
+        xquartz
+        x2goclient
+        transmit
+        java
+        eclipse-java
+        clamxav
+        evernote
+        spotify
+        spotify-notifications
+        iterm2
+        gpgtools
+        flash
+        flash-player
+        mumble
+        gfxcardstatus
+        charles
+        easyfind
+        little-snitch
+    );
+    brew cask install ${applications[@]}
+    brew cask cleanup
+    newline
+}
 
 ### cleanup and display brew doctor output
-echo "[brew] cleaning up..."
-brew upgrade
-brew cleanup --force
-brew doctor
-newline
+function brew_cleanup() {
+    ECHO_PREFIX="brew"
+    xecho "cleaning up..."
+    brew upgrade
+    brew cleanup --force
+    brew doctor
+    newline
+}
+
+### do the brew things
+brew_install_upgrade
+brew_taps
+brew_tuntap
+brew_install_utils
+brew_install_apps
+brew_cleanup
 
 
 ###############################################################################
 # Python Environment Setup                                                    #
 ###############################################################################
 
-echo "[python] setting up global python environment..."
-gpip install --upgrade pip setuptools wheel
-gpip install --upgrade virtualenv virtualenvwrapper
-gpip install --upgrade requests sqlalchemy
-gpip install --upgrade markdown beautifulsoup4 lxml
-gpip install --upgrade Pillow Jinja2 Pygments
-gpip install --upgrade ansible
-gpip install --upgrade pyopenssl ndg-httpsclient pyasn1
-newline
+function install_global_python_packages() {
+    ECHO_PREFIX="python"
+    xecho "setting up global python environment..."
+    pypackages=(
+        pip
+        setuptools
+        wheel
+        virtualenv
+        virtualenvwrapper
+        requests
+        sqlalchemy
+        markdown
+        beautifulsoup4
+        lxml
+        Pillow
+        Jinja2
+        Pygments
+        ansible
+        pyopenssl
+        ndg-httpsclient
+        pyasn1
+        supervisor
+    );
+    gpip install --upgrade ${pypackages[@]}
+    newline
+}
+
+install_global_python_packages
 
 
 ###############################################################################
@@ -240,7 +370,7 @@ function ffinstall() {
     FFHASH=${FFHASH%<*}
     popd > /dev/null
 
-    ### create firefox addon dir if needed and move new addon
+    ### create firefox addon dir if needed and move new addons
     xecho "installing $AONAME $FFHASH..."
     mkdir -p "$EXTENTIONS"
     if [ -d "$EXTENTIONS/$FFHASH" ]; then
@@ -249,6 +379,19 @@ function ffinstall() {
         mv "$ADDONDIR" "$EXTENTIONS/$FFHASH"
         xecho "addon $AONAME installed."
     fi
+
+    ### deploy user preferences file
+    USERPREFSFILE="${FFDIR}/${PROFILEDIR}/user.js"
+    USERPREFSBACKUP="${FFDIR}/${PROFILEDIR}/user.js.original"
+    if ! [ -f "$USERPREFSBACKUP" ]; then
+        if [ -f "$USERPREFSFILE" ]; then
+            xecho "backing up current user preferences..."
+            cp -p "$USERPREFSFILE" "$USERPREFSBACKUP"
+        else
+            xecho "no current prefs file found..."
+        fi
+    fi
+    xecho "deploying user preferences..."
 
     return 0
 }
@@ -465,7 +608,7 @@ function configure_screenshots() {
     ECHO_PREFIX="osx:screenshots"
 
     xecho "set screenshot format"
-    defaults write com.apple.screencapture type -string “png”
+    defaults write com.apple.screencapture type -string "png"
 
     xecho "change screenshot save location"
     defaults write com.apple.screencapture location ~/screenshots
@@ -479,16 +622,19 @@ function dockadd() {
     defaults write com.apple.dock 'persistent-apps' -array-add "$appstring"
     xecho "added $1"
 }
+function othersadd() {
+    appstring="<dict><key>tile-data</key><dict><key>file-data</key><dict><key>_CFURLString</key><string>$1</string><key>_CFURLStringType</key><integer>0</integer></dict></dict></dict>"
+    defaults write com.apple.dock 'persistent-others' -array-add "$appstring"
+    xecho "added $1"
+}
 function configure_dock() {
     ECHO_PREFIX="osx:dock"
 
     xecho "remove default dock icons"
-    defaults write com.apple.dock persistent-apps -array ""
+    defaults write com.apple.dock 'persistent-apps' -array ""
+    defaults write com.apple.dock 'persistent-others' -array ""
     # http://hints.macworld.com/article.php?story=20040819170450489
     #defaults write com.apple.dock 'checked-for-launchpad' -bool true
-
-    xecho "add a spacer to the left side of the Dock (where the applications are)"
-    defaults write com.apple.dock 'persistent-apps' -array-add '{tile-data={}; tile-type="spacer-tile";}'
 
     xecho "adding custom dock icon set..."
     dockadd "/Applications/Launchpad.app/"
@@ -507,11 +653,14 @@ function configure_dock() {
     dockadd "/Applications/Utilities/Activity Monitor.app/"
     dockadd "/Applications/1Password 5.app/"
 
+    xecho "add a spacer to the left side of the Dock (where the applications are)"
+    defaults write com.apple.dock 'persistent-apps' -array-add '{tile-data={}; tile-type="spacer-tile";}'
+
     xecho "add a spacer to the right side of the Dock (where the Trash is)"
     defaults write com.apple.dock 'persistent-others' -array-add '{tile-data={}; tile-type="spacer-tile";}'
 
-    #xecho "add the dropbox folder to persistent-others"
-    #defaults write com.apple.dock 'persistent-others' -array-add "<dict><key>tile-data</key><dict><key>arrangement</key><integer>0</integer><key>displayas</key><integer>1</integer><key>file-data</key><dict><key>_CFURLString</key><string>$HOME/Dropbox/</string><key>_CFURLStringType</key><integer>0</integer></dict><key>preferreditemsize</key><integer>-1</integer><key>showas</key><integer>3</integer></dict><key>tile-type</key><string>directory-tile</string></dict>"
+    othersadd "${HOME}/Dropbox"
+    othersadd "${HOME}/Downloads"
 
     xecho "disable dock magnification"
     defaults write com.apple.dock 'magnification' -bool false
@@ -548,8 +697,8 @@ function configure_hot_corners() {
     # 12: Notification Center
 
     xecho "set bottom right screen corner --> desktop"
-    defaults write com.apple.dock wvous-br-corner -int 4
-    defaults write com.apple.dock wvous-br-modifier -int 0
+    defaults write com.apple.dock wvous-bl-corner -int 4
+    defaults write com.apple.dock wvous-bl-modifier -int 0
 
     xecho "set top right screen corner --> screen saver"
     defaults write com.apple.dock wvous-tr-corner -int 5
@@ -607,8 +756,8 @@ function configure_misc() {
     xecho "minimize window with double-click in title bar"
     defaults write NSGlobalDomain AppleMiniaturizeOnDoubleClick -bool true
 
-    xecho "enable HiDPI display modes (requires restart)"
-    sudo defaults write /Library/Preferences/com.apple.windowserver DisplayResolutionEnabled -bool true
+    #xecho "enable HiDPI display modes (requires restart)"
+    #sudo defaults write /Library/Preferences/com.apple.windowserver DisplayResolutionEnabled -bool true
 
     xecho "show mirroring options in the menu bar when available"
     defaults write com.apple.airplay showInMenuBarIfPresent -bool true
@@ -643,7 +792,9 @@ killall -KILL Dock
 ###############################################################################
 # Finished.                                                                   #
 ###############################################################################
-echo "[bootstrap] done. Please restart for all changes to take effect!"
+ECHO_PREFIX="bootstrap"
+xecho "done. Please restart for all changes to take effect!"
 #sudo shutdown -r now
+echo -e "${bootstrap_lbreak}"
 exit 0
 
