@@ -260,7 +260,10 @@ function brew_install_apps() {
         gfxcardstatus
         charles
         easyfind
+        netspot
         little-snitch
+        clementine
+        dash
     );
     brew cask install ${applications[@]}
     brew cask cleanup
