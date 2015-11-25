@@ -1,0 +1,7 @@
+Host *
+  ForwardAgent yes
+  ControlMaster auto
+  ControlPath ~/.ssh/master-%r@%h:%p.ctl
+  ConnectTimeout 5
+  ExitOnForwardFailure yes
+  ControlPersist 5

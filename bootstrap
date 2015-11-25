@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
 
+# TODO:
+# install sublime snippets for bash/python scripts
+# add root and user folder to finder favorites
+# set noscript whitelist
+# whitelist pocket things (about:pocket_signin, about:pocket_saved)
+# set wallpaper
+# symlink with dropbox
+# setup terminal preferences (color scheme, font size, autoclose ended processes)
+# set keyboard swap keys for usb keyboard
+# cron job for updating brew packages and python packages
+# enable bash autocompletion for git/etc
+# set terminal and sourcetree preferences
+# set google as default search engine in firefox
+# add git configuration
+# rename to osxsetup
+
+
 set -e
 LOGFILE="/tmp/osxbootstrap.log"
 
@@ -728,7 +745,47 @@ function configure_activity_monitor() {
     defaults write com.apple.ActivityMonitor UpdatePeriod -int 1
 }
 
+
+function CFPreferencesAppSynchronize() {
+    python - <<END
+from Foundation import CFPreferencesAppSynchronize
+CFPreferencesAppSynchronize('$1')
+END
+}
 function configure_terminal() {
+
+    # ----------------------------------------------
+    # Copy the Basic profile to "Basic Improved"
+    # ----------------------------------------------
+    pathToTerminalPrefs="${HOME}/Library/Preferences/com.apple.Terminal.plist"
+    /usr/libexec/PlistBuddy -c "Copy :Window\ Settings:Basic :Window\ Settings:Basic\ Improved" ${pathToTerminalPrefs}
+    /usr/libexec/PlistBuddy -c "Set :Window\ Settings:Basic\ Improved:name Basic\ Improved" ${pathToTerminalPrefs}
+
+    # ----------------------------------------------
+    # Modify the "Basic Improved" profile
+    # ----------------------------------------------
+
+    # Close if the shell exited cleanly
+    /usr/libexec/PlistBuddy -c "Add :Window\ Settings:Basic\ Improved:shellExitAction integer 1" ${pathToTerminalPrefs}
+
+    # Make the window a bit larger
+    /usr/libexec/PlistBuddy -c "Add :Window\ Settings:Basic\ Improved:columnCount integer 120" ${pathToTerminalPrefs}
+    /usr/libexec/PlistBuddy -c "Add :Window\ Settings:Basic\ Improved:rowCount integer 70" ${pathToTerminalPrefs}
+
+    # ----------------------------------------------
+    # Modify Terminal preferences
+    # ----------------------------------------------
+
+    # Shell opens with: /bin/bash
+    defaults write com.apple.Terminal Shell -string "/bin/bash"
+
+    # Set the "Basic Improved" as the default
+    defaults write com.apple.Terminal "Startup Window Settings" -string "Basic Improved"
+    defaults write com.apple.Terminal "Default Window Settings" -string "Basic Improved"
+
+    CFPreferencesAppSynchronize "com.apple.Terminal"
+
+
     # terminal and iterm2
     # Only use UTF-8 in Terminal.app
     defaults write com.apple.terminal StringEncodings -array 4
@@ -801,3 +858,48 @@ xecho "done. Please restart for all changes to take effect!"
 echo -e "${bootstrap_lbreak}"
 exit 0
 
+
+
+
+
+# ==============================================
+# Kill affected applications
+# ==============================================
+
+function killallApps() {
+    killall "Finder" > /dev/null 2>&1
+    killall "SystemUIServer" > /dev/null 2>&1
+    killall "Dock" > /dev/null 2>&1
+
+    appsToKill=(
+    "Activity Monitor"
+    "BBEdit"
+    "Calendar"
+    "Contacts"
+    "Dashboard"
+    "Disk Utility"
+    "Safari"
+    "System Preferences"
+    "TextWrangler"
+    "Xcode"
+    )
+
+    for app in "${appsToKill[@]}"
+    do
+        killall "${app}" > /dev/null 2>&1
+        if [[ $? -eq 0 ]]; then
+            # We just killed an app so restart it
+            open -a "${app}"
+        fi
+    done
+
+    echo "Note that some of these changes require a logout/restart to take effect."
+}
+
+printf "Restart the affected applications? (y/n): "
+read killallReply
+if [[ $killallReply =~ ^[Yy]$ ]]; then
+    killallApps
+fi
+
+exit 0
