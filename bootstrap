@@ -175,11 +175,10 @@ function brew_taps() {
     newline
 }
 
-### install tuntap via cask to avoid Yosemite errors about kext signing
+### install tuntap via cask to avoid errors about kext signing
 function brew_tuntap() {
     ECHO_PREFIX="brew"
-    xecho "install tuntap now via cask to avoid Yosemite signing errors..."
-    brew install brew-cask
+    xecho "install tuntap now via cask to avoid signing errors..."
     brew cask install tuntap
     newline
 }
