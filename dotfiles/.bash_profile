@@ -16,7 +16,7 @@ export HOMEBREW_CASK_OPTS="--appdir=/Applications --caskroom=/opt/brew-cask"
 ### virtualenv setup and shortcuts
 export PIP_REQUIRE_VIRTUALENV=true
 export WORKON_HOME="~/envs"
-. /usr/local/bin/virtualenvwrapper.sh
+if [ -f /usr/local/bin/virtualenvwrapper.sh ]; then . /usr/local/bin/virtualenvwrapper.sh; fi
 alias mkvenv="mkvirtualenv"
 alias mkvenv3="mkvirtualenv -p python3"
 alias rmvenv="rmvirtualenv"
