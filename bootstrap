@@ -197,6 +197,7 @@ function brew_install_utils() {
         ffind
         autoenv
         coreutils
+        e2fsprogs
         findutils
         ffmpeg
         imagemagick
@@ -307,15 +308,15 @@ function install_global_python_packages() {
         beautifulsoup4
         lxml
         Pillow
+        supervisor
         Jinja2
         Pygments
         ansible
         pyopenssl
         ndg-httpsclient
         pyasn1
-        supervisor
     );
-    gpip install --upgrade ${pypackages[@]}
+    gpip install --upgrade --upgrade-strategy eager ${pypackages[@]}
     newline
 }
 
